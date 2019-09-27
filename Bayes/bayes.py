@@ -18,8 +18,7 @@ def loadDataSet():
 def createVocabList(dataSet):
     vocabSet = set([])
     # 将文档列表转为集合的形式，保证每个词条的唯一性
-    # 然后与vocabSet取并集，向vocabSet中添加没有出现
-    # 的新的词条
+    # 然后与vocabSet取并集，向vocabSet中添加没有出现的新的词条
     for document in dataSet:
         vocabSet = vocabSet | set(document) # 创建两个集合的并集
     return list(vocabSet)
