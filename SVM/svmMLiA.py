@@ -30,43 +30,364 @@ def clipAlpha(aj, H, L):
 # print(dataArr)
 
 # 简化版SMO算法
+
+"""smoSimple
+
+    Args:
+        dataMatIn    特征集合
+        classLabels  类别标签
+        C   松弛变量(常量值)，允许有些数据点可以处于分隔面的错误一侧。
+            控制最大化间隔和保证大部分的函数间隔小于1.0这两个目标的权重。
+            可以通过调节该参数达到不同的结果。
+        toler   容错率（是指在某个体系中能减小一些因素或选择对某个系统产生不稳定的概率。）
+        maxIter 退出前最大的循环次数
+    Returns:
+        b       模型的常量值
+        alphas  拉格朗日乘子
+    """
 def smoSimple(dataMatIn, classLabels, C, toler, maxIter):
-    dataMatrix = mat(dataMatIn); labelMat = mat(classLabels).transpose()
-    b = 0; m,n = shape(dataMatrix)
-    alphas = mat(zeros((m,1)))
+    dataMatrix = mat(dataMatIn)
+    # 矩阵转置 和 .T 一样的功能
+    labelMat = mat(classLabels).transpose()
+    m, n = shape(dataMatrix)
+
+    # 初始化 b和alphas(alpha有点类似权重值。)
+    b = 0
+    alphas = mat(zeros((m, 1)))
+
+    # 没有任何alpha改变的情况下遍历数据的次数
     iter = 0
     while (iter < maxIter):
+        # 记录alpha是否已经进行优化，每次循环时设为0，然后再对整个集合顺序遍历
         alphaPairsChanged = 0
         for i in range(m):
-            fXi = float(multiply(alphas,labelMat).T*(dataMatrix*dataMatrix[i,:].T)) + b
-            Ei = fXi - float(labelMat[i])#if checks if an example violates KKT conditions
+            # print 'alphas=', alphas
+            # print 'labelMat=', labelMat
+            # print 'multiply(alphas, labelMat)=', multiply(alphas, labelMat)
+            # 我们预测的类别 y[i] = w^Tx[i]+b; 其中因为 w = Σ(1~n) a[n]*label[n]*x[n]
+            fXi = float(multiply(alphas, labelMat).T*(dataMatrix*dataMatrix[i, :].T)) + b
+            # 预测结果与真实结果比对，计算误差Ei
+            Ei = fXi - float(labelMat[i])
+
+            # 约束条件 (KKT条件是解决最优化问题的时用到的一种方法。我们这里提到的最优化问题通常是指对于给定的某一函数，求其在指定作用域上的全局最小值)
+            # 0<=alphas[i]<=C，但由于0和C是边界值，我们无法进行优化，因为需要增加一个alphas和降低一个alphas。
+            # 表示发生错误的概率：labelMat[i]*Ei 如果超出了 toler， 才需要优化。至于正负号，我们考虑绝对值就对了。
+            '''
+            # 检验训练样本(xi, yi)是否满足KKT条件
+            yi*f(i) >= 1 and alpha = 0 (outside the boundary)
+            yi*f(i) == 1 and 0<alpha< C (on the boundary)
+            yi*f(i) <= 1 and alpha = C (between the boundary)
+            '''
             if ((labelMat[i]*Ei < -toler) and (alphas[i] < C)) or ((labelMat[i]*Ei > toler) and (alphas[i] > 0)):
-                j = selectJrand(i,m)
-                fXj = float(multiply(alphas,labelMat).T*(dataMatrix*dataMatrix[j,:].T)) + b
+
+                # 如果满足优化的条件，我们就随机选取非i的一个点，进行优化比较
+                j = selectJrand(i, m)
+                # 预测j的结果
+                fXj = float(multiply(alphas, labelMat).T*(dataMatrix*dataMatrix[j, :].T)) + b
                 Ej = fXj - float(labelMat[j])
-                alphaIold = alphas[i].copy(); alphaJold = alphas[j].copy();
+                alphaIold = alphas[i].copy()
+                alphaJold = alphas[j].copy()
+
+                # L和H用于将alphas[j]调整到0-C之间。如果L==H，就不做任何改变，直接执行continue语句
+                # labelMat[i] != labelMat[j] 表示异侧，就相减，否则是同侧，就相加。
                 if (labelMat[i] != labelMat[j]):
                     L = max(0, alphas[j] - alphas[i])
                     H = min(C, C + alphas[j] - alphas[i])
                 else:
                     L = max(0, alphas[j] + alphas[i] - C)
                     H = min(C, alphas[j] + alphas[i])
-                if L==H: print "L==H"; continue
-                eta = 2.0 * dataMatrix[i,:]*dataMatrix[j,:].T - dataMatrix[i,:]*dataMatrix[i,:].T - dataMatrix[j,:]*dataMatrix[j,:].T
-                if eta >= 0: print "eta>=0"; continue
+                # 如果相同，就没法优化了
+                if L == H:
+                    print("L==H")
+                    continue
+
+                # eta是alphas[j]的最优修改量，如果eta==0，需要退出for循环的当前迭代过程
+                # 参考《统计学习方法》李航<序列最小最优化算法>
+                eta = 2.0 * dataMatrix[i, :]*dataMatrix[j, :].T - dataMatrix[i, :]*dataMatrix[i, :].T - dataMatrix[j, :]*dataMatrix[j, :].T
+                if eta >= 0:
+                    print("eta>=0")
+                    continue
+
+                # 计算出一个新的alphas[j]值
                 alphas[j] -= labelMat[j]*(Ei - Ej)/eta
-                alphas[j] = clipAlpha(alphas[j],H,L)
-                if (abs(alphas[j] - alphaJold) < 0.00001): print "j not moving enough"; continue
-                alphas[i] += labelMat[j]*labelMat[i]*(alphaJold - alphas[j])#update i by the same amount as j
-                                                                        #the update is in the oppostie direction
-                b1 = b - Ei- labelMat[i]*(alphas[i]-alphaIold)*dataMatrix[i,:]*dataMatrix[i,:].T - labelMat[j]*(alphas[j]-alphaJold)*dataMatrix[i,:]*dataMatrix[j,:].T
-                b2 = b - Ej- labelMat[i]*(alphas[i]-alphaIold)*dataMatrix[i,:]*dataMatrix[j,:].T - labelMat[j]*(alphas[j]-alphaJold)*dataMatrix[j,:]*dataMatrix[j,:].T
-                if (0 < alphas[i]) and (C > alphas[i]): b = b1
-                elif (0 < alphas[j]) and (C > alphas[j]): b = b2
-                else: b = (b1 + b2)/2.0
+                # 并使用辅助函数，以及L和H对其进行调整
+                alphas[j] = clipAlpha(alphas[j], H, L)
+                # 检查alpha[j]是否只是轻微的改变，如果是的话，就退出for循环。
+                if (abs(alphas[j] - alphaJold) < 0.00001):
+                    print("j not moving enough")
+                    continue
+                # 然后alphas[i]和alphas[j]同样进行改变，虽然改变的大小一样，但是改变的方向正好相反
+                alphas[i] += labelMat[j]*labelMat[i]*(alphaJold - alphas[j])
+                # 在对alpha[i], alpha[j] 进行优化之后，给这两个alpha值设置一个常数b。
+                # w= Σ[1~n] ai*yi*xi => b = yj- Σ[1~n] ai*yi(xi*xj)
+                # 所以：  b1 - b = (y1-y) - Σ[1~n] yi*(a1-a)*(xi*x1)
+                # 为什么减2遍？ 因为是 减去Σ[1~n]，正好2个变量i和j，所以减2遍
+                b1 = b - Ei- labelMat[i]*(alphas[i]-alphaIold)*dataMatrix[i, :]*dataMatrix[i, :].T - labelMat[j]*(alphas[j]-alphaJold)*dataMatrix[i, :]*dataMatrix[j, :].T
+                b2 = b - Ej- labelMat[i]*(alphas[i]-alphaIold)*dataMatrix[i, :]*dataMatrix[j, :].T - labelMat[j]*(alphas[j]-alphaJold)*dataMatrix[j, :]*dataMatrix[j, :].T
+                if (0 < alphas[i]) and (C > alphas[i]):
+                    b = b1
+                elif (0 < alphas[j]) and (C > alphas[j]):
+                    b = b2
+                else:
+                    b = (b1 + b2)/2.0
                 alphaPairsChanged += 1
-                print "iter: %d i:%d, pairs changed %d" % (iter,i,alphaPairsChanged)
-        if (alphaPairsChanged == 0): iter += 1
-        else: iter = 0
-        print "iteration number: %d" % iter
-    return b,alphas
+                print("iter: %d i:%d, pairs changed %d" % (iter, i, alphaPairsChanged))
+        # 在for循环外，检查alpha值是否做了更新，如果更新则将iter设为0后继续运行程序
+        # 直到更新完毕后，iter次循环无变化，才退出循环。
+        if (alphaPairsChanged == 0):
+            iter += 1
+        else:
+            iter = 0
+        print("iteration number: %d" % iter)
+    return b, alphas
+
+# # 测试
+# dataArr, labelArr = loadDataSet('testSet.txt')
+# b, alphas = smoSimple(dataArr, labelArr, 0.6, 0.001, 40)
+# print(b)
+
+# 完整版Platt SMO的支持函数
+
+class optStruct:
+    # self为当前类的实例自身
+    def __init__(self, dataMatIn, classLabels, C, toler):  # Initialize the structure with the parameters
+        self.X = dataMatIn
+        self.labelMat = classLabels
+        self.C = C
+        self.tol = toler
+        self.m = shape(dataMatIn)[0]
+        self.alphas = mat(zeros((self.m, 1)))
+        self.b = 0
+        # eCache 第一列给出的是eCache是否有效的标志位，第二列给出的是实际的E值
+        self.eCache = mat(zeros((self.m, 2)))
+
+def calcEk(oS, k):
+    """calcEk（求 Ek误差：预测值-真实值的差）
+    该过程在完整版的SMO算法中出现次数较多，因此将其单独作为一个方法
+    Args:
+        oS  optStruct对象
+        k   具体的某一行
+    Returns:
+        Ek  预测结果与真实结果比对，计算误差Ek
+    """
+    fXk = float(multiply(oS.alphas, oS.labelMat).T * (oS.X * oS.X[k, :].T)) + oS.b
+    Ek = fXk - float(oS.labelMat[k])
+    return Ek
+
+
+def selectJ(i, oS, Ei):  # this is the second choice -heurstic, and calcs Ej
+    """
+    selectJ（返回最优的j和Ej）
+    内循环的启发式方法。
+    选择第二个(内循环)alpha的alpha值
+    这里的目标是选择合适的第二个alpha值以保证每次优化中采用最大步长。
+    该函数的误差与第一个alpha值Ei和下标i有关。
+    Args:
+        i   具体的第i一行
+        oS  optStruct对象
+        Ei  预测结果与真实结果比对，计算误差Ei
+    Returns:
+        j  随机选出的第j一行
+        Ej 预测结果与真实结果比对，计算误差Ej
+    """
+    maxK = -1
+    maxDeltaE = 0
+    Ej = 0
+    # 首先将输入值Ei在缓存中设置成为有效的。这里的有效意味着它已经计算好了。
+    oS.eCache[i] = [1, Ei]
+
+    # 非零E值的行的list列表，所对应的alpha值
+    validEcacheList = nonzero(oS.eCache[:, 0].A)[0]
+    if (len(validEcacheList)) > 1:
+        for k in validEcacheList:  # 在所有的值上进行循环，并选择其中使得改变最大的那个值
+            if k == i:
+                continue  # don't calc for i, waste of time
+
+            # 求 Ek误差：预测值-真实值的差
+            Ek = calcEk(oS, k)
+            deltaE = abs(Ei - Ek)
+            if (deltaE > maxDeltaE):
+                maxK = k
+                maxDeltaE = deltaE
+                Ej = Ek
+        return maxK, Ej
+    else:  # 如果是第一次循环，则随机选择一个alpha值
+        j = selectJrand(i, oS.m)
+
+        # 求 Ek误差：预测值-真实值的差
+        Ej = calcEk(oS, j)
+    return j, Ej
+
+
+def updateEk(oS, k):
+    """updateEk（计算误差值并存入缓存中。）
+    在对alpha值进行优化之后会用到这个值。
+    Args:
+        oS  optStruct对象
+        k   某一列的行号
+    """
+
+    # 求 误差：预测值-真实值的差
+    Ek = calcEk(oS, k)
+    oS.eCache[k] = [1, Ek]
+
+# 完整版Platt SMO算法的优化例程
+def innerL(i, oS):
+    """innerL
+    内循环代码
+    Args:
+        i   具体的某一行
+        oS  optStruct对象
+    Returns:
+        0   找不到最优的值
+        1   找到了最优的值，并且oS.Cache到缓存中
+    """
+
+    # 求 Ek误差：预测值-真实值的差
+    Ei = calcEk(oS, i)
+
+    # 约束条件 (KKT条件是解决最优化问题的时用到的一种方法。我们这里提到的最优化问题通常是指对于给定的某一函数，求其在指定作用域上的全局最小值)
+    # 0<=alphas[i]<=C，但由于0和C是边界值，我们无法进行优化，因为需要增加一个alphas和降低一个alphas。
+    # 表示发生错误的概率：labelMat[i]*Ei 如果超出了 toler， 才需要优化。至于正负号，我们考虑绝对值就对了。
+    '''
+    # 检验训练样本(xi, yi)是否满足KKT条件
+    yi*f(i) >= 1 and alpha = 0 (outside the boundary)
+    yi*f(i) == 1 and 0<alpha< C (on the boundary)
+    yi*f(i) <= 1 and alpha = C (between the boundary)
+    '''
+    if ((oS.labelMat[i] * Ei < -oS.tol) and (oS.alphas[i] < oS.C)) or ((oS.labelMat[i] * Ei > oS.tol) and (oS.alphas[i] > 0)):
+        # 选择最大的误差对应的j进行优化，效果更明显
+        j, Ej = selectJ(i, oS, Ei)
+        alphaIold = oS.alphas[i].copy()
+        alphaJold = oS.alphas[j].copy()
+
+        # L和H用于将alphas[j]调整到0-C之间。如果L==H，就不做任何改变，直接return 0
+        if (oS.labelMat[i] != oS.labelMat[j]):
+            L = max(0, oS.alphas[j] - oS.alphas[i])
+            H = min(oS.C, oS.C + oS.alphas[j] - oS.alphas[i])
+        else:
+            L = max(0, oS.alphas[j] + oS.alphas[i] - oS.C)
+            H = min(oS.C, oS.alphas[j] + oS.alphas[i])
+        if L == H:
+            print("L==H")
+            return 0
+
+        # eta是alphas[j]的最优修改量，如果eta==0，需要退出for循环的当前迭代过程
+        # 参考《统计学习方法》李航<序列最小最优化算法>
+        eta = 2.0 * oS.X[i, :] * oS.X[j, :].T - oS.X[i, :] * oS.X[i, :].T - oS.X[j, :] * oS.X[j, :].T
+        if eta >= 0:
+            print("eta>=0")
+            return 0
+
+        # 计算出一个新的alphas[j]值
+        oS.alphas[j] -= oS.labelMat[j] * (Ei - Ej) / eta
+        # 并使用辅助函数，以及L和H对其进行调整
+        oS.alphas[j] = clipAlpha(oS.alphas[j], H, L)
+        # 更新误差缓存
+        updateEk(oS, j)
+
+        # 检查alpha[j]是否只是轻微的改变，如果是的话，就退出for循环。
+        if (abs(oS.alphas[j] - alphaJold) < 0.00001):
+            print("j not moving enough")
+            return 0
+
+        # 然后alphas[i]和alphas[j]同样进行改变，虽然改变的大小一样，但是改变的方向正好相反
+        oS.alphas[i] += oS.labelMat[j] * oS.labelMat[i] * (alphaJold - oS.alphas[j])
+        # 更新误差缓存
+        updateEk(oS, i)
+
+        # 在对alpha[i], alpha[j] 进行优化之后，给这两个alpha值设置一个常数b。
+        # w= Σ[1~n] ai*yi*xi => b = yj Σ[1~n] ai*yi(xi*xj)
+        # 所以：  b1 - b = (y1-y) - Σ[1~n] yi*(a1-a)*(xi*x1)
+        # 为什么减2遍？ 因为是 减去Σ[1~n]，正好2个变量i和j，所以减2遍
+        b1 = oS.b - Ei - oS.labelMat[i] * (oS.alphas[i] - alphaIold) * oS.X[i, :] * oS.X[i, :].T - oS.labelMat[j] * (oS.alphas[j] - alphaJold) * oS.X[i, :] * oS.X[j, :].T
+        b2 = oS.b - Ej - oS.labelMat[i] * (oS.alphas[i] - alphaIold) * oS.X[i, :] * oS.X[j, :].T - oS.labelMat[j] * (oS.alphas[j] - alphaJold) * oS.X[j, :] * oS.X[j, :].T
+        if (0 < oS.alphas[i]) and (oS.C > oS.alphas[i]):
+            oS.b = b1
+        elif (0 < oS.alphas[j]) and (oS.C > oS.alphas[j]):
+            oS.b = b2
+        else:
+            oS.b = (b1 + b2) / 2.0
+        return 1
+    else:
+        return 0
+
+# 完整版Platt SMO的外循环代码
+def smoP(dataMatIn, classLabels, C, toler, maxIter):
+    """
+    完整SMO算法外循环，与smoSimple有些类似，但这里的循环退出条件更多一些
+    Args:
+        dataMatIn    数据集
+        classLabels  类别标签
+        C   松弛变量(常量值)，允许有些数据点可以处于分隔面的错误一侧。
+            控制最大化间隔和保证大部分的函数间隔小于1.0这两个目标的权重。
+            可以通过调节该参数达到不同的结果。
+        toler   容错率
+        maxIter 退出前最大的循环次数
+    Returns:
+        b       模型的常量值
+        alphas  拉格朗日乘子
+    """
+
+    # 创建一个 optStruct 对象
+    oS = optStruct(mat(dataMatIn), mat(classLabels).transpose(), C, toler)
+    iter = 0
+    entireSet = True
+    alphaPairsChanged = 0
+
+    # 循环遍历：循环maxIter次 并且 （alphaPairsChanged存在可以改变 or 所有行遍历一遍）
+    # 循环迭代结束 或者 循环遍历所有alpha后，alphaPairs还是没变化
+    while (iter < maxIter) and ((alphaPairsChanged > 0) or (entireSet)):
+        alphaPairsChanged = 0
+
+        #  当entireSet=true or 非边界alpha对没有了；就开始寻找 alpha对，然后决定是否要进行else。
+        if entireSet:
+            # 在数据集上遍历所有可能的alpha
+            for i in range(oS.m):
+                # 是否存在alpha对，存在就+1
+                alphaPairsChanged += innerL(i, oS)
+                print("fullSet, iter: %d i:%d, pairs changed %d" % (iter, i, alphaPairsChanged))
+            iter += 1
+        # 对已存在 alpha对，选出非边界的alpha值，进行优化。
+        else:
+            # 遍历所有的非边界alpha值，也就是不在边界0或C上的值。
+            nonBoundIs = nonzero((oS.alphas.A > 0) * (oS.alphas.A < C))[0]
+            for i in nonBoundIs:
+                alphaPairsChanged += innerL(i, oS)
+                print("non-bound, iter: %d i:%d, pairs changed %d" % (iter, i, alphaPairsChanged))
+            iter += 1
+
+        # 如果找到alpha对，就优化非边界alpha值，否则，就重新进行寻找，如果寻找一遍 遍历所有的行还是没找到，就退出循环。
+        if entireSet:
+            entireSet = False  # toggle entire set loop
+        elif (alphaPairsChanged == 0):
+            entireSet = True
+        print("iteration number: %d" % iter)
+    return oS.b, oS.alphas
+
+def calcWs(alphas, dataArr, classLabels):
+    """
+    基于alpha计算w值
+    Args:
+        alphas        拉格朗日乘子
+        dataArr       feature数据集
+        classLabels   目标变量数据集
+    Returns:
+        wc  回归系数
+    """
+    X = mat(dataArr)
+    labelMat = mat(classLabels).transpose()
+    m, n = shape(X)
+    w = zeros((n, 1))
+    for i in range(m):
+        w += multiply(alphas[i] * labelMat[i], X[i, :].T)
+    return w
+
+# 测试
+dataArr, labelArr = loadDataSet('testSet.txt')
+b, alphas = smoP(dataArr, labelArr, 0.6, 0.001, 40)
+ws = calcWs(alphas, dataArr, labelArr)
+dataMat = mat(dataArr)
+print(dataMat[0] * mat(ws) + b )
+print(labelArr[0])
+
