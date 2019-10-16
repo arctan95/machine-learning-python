@@ -150,7 +150,7 @@ def smoSimple(dataMatIn, classLabels, C, toler, maxIter):
 
 class optStruct:
     # self为当前类的实例自身
-    def __init__(self, dataMatIn, classLabels, C, toler):  # Initialize the structure with the parameters
+    def __init__(self, dataMatIn, classLabels, C, toler, kTup):  # Initialize the structure with the parameters
         self.X = dataMatIn
         self.labelMat = classLabels
         self.C = C
@@ -160,6 +160,9 @@ class optStruct:
         self.b = 0
         # eCache 第一列给出的是eCache是否有效的标志位，第二列给出的是实际的E值
         self.eCache = mat(zeros((self.m, 2)))
+        self.K = mat(zeros((self.m, self.m)))
+        for i in range(self.m):
+            self.K[:,i] = kernelTrans(self.X, self.X[i,:], kTup)
 
 def calcEk(oS, k):
     """calcEk（求 Ek误差：预测值-真实值的差）
@@ -170,7 +173,7 @@ def calcEk(oS, k):
     Returns:
         Ek  预测结果与真实结果比对，计算误差Ek
     """
-    fXk = float(multiply(oS.alphas, oS.labelMat).T * (oS.X * oS.X[k, :].T)) + oS.b
+    fXk = float(multiply(oS.alphas, oS.labelMat).T * oS.K[:, k] + oS.b)
     Ek = fXk - float(oS.labelMat[k])
     return Ek
 
@@ -274,7 +277,7 @@ def innerL(i, oS):
 
         # eta是alphas[j]的最优修改量，如果eta==0，需要退出for循环的当前迭代过程
         # 参考《统计学习方法》李航<序列最小最优化算法>
-        eta = 2.0 * oS.X[i, :] * oS.X[j, :].T - oS.X[i, :] * oS.X[i, :].T - oS.X[j, :] * oS.X[j, :].T
+        eta = 2.0 * oS.K[i, j] - oS.K[i, i] - oS.K[j, j]
         if eta >= 0:
             print("eta>=0")
             return 0
@@ -300,8 +303,10 @@ def innerL(i, oS):
         # w= Σ[1~n] ai*yi*xi => b = yj Σ[1~n] ai*yi(xi*xj)
         # 所以：  b1 - b = (y1-y) - Σ[1~n] yi*(a1-a)*(xi*x1)
         # 为什么减2遍？ 因为是 减去Σ[1~n]，正好2个变量i和j，所以减2遍
-        b1 = oS.b - Ei - oS.labelMat[i] * (oS.alphas[i] - alphaIold) * oS.X[i, :] * oS.X[i, :].T - oS.labelMat[j] * (oS.alphas[j] - alphaJold) * oS.X[i, :] * oS.X[j, :].T
-        b2 = oS.b - Ej - oS.labelMat[i] * (oS.alphas[i] - alphaIold) * oS.X[i, :] * oS.X[j, :].T - oS.labelMat[j] * (oS.alphas[j] - alphaJold) * oS.X[j, :] * oS.X[j, :].T
+        b1 = oS.b - Ei - oS.labelMat[i] * (oS.alphas[i] - alphaIold) * oS.K[i, i] - oS.labelMat[j] * (
+                    oS.alphas[j] - alphaJold) * oS.K[i, j]
+        b2 = oS.b - Ej - oS.labelMat[i] * (oS.alphas[i] - alphaIold) * oS.K[i, j] - oS.labelMat[j] * (
+                    oS.alphas[j] - alphaJold) * oS.K[j, j]
         if (0 < oS.alphas[i]) and (oS.C > oS.alphas[i]):
             oS.b = b1
         elif (0 < oS.alphas[j]) and (oS.C > oS.alphas[j]):
@@ -313,7 +318,7 @@ def innerL(i, oS):
         return 0
 
 # 完整版Platt SMO的外循环代码
-def smoP(dataMatIn, classLabels, C, toler, maxIter):
+def smoP(dataMatIn, classLabels, C, toler, maxIter, kTup=('lin', 0)):
     """
     完整SMO算法外循环，与smoSimple有些类似，但这里的循环退出条件更多一些
     Args:
@@ -324,19 +329,19 @@ def smoP(dataMatIn, classLabels, C, toler, maxIter):
             可以通过调节该参数达到不同的结果。
         toler   容错率
         maxIter 退出前最大的循环次数
+        kTup    包含核函数信息的元组
     Returns:
         b       模型的常量值
         alphas  拉格朗日乘子
     """
 
     # 创建一个 optStruct 对象
-    oS = optStruct(mat(dataMatIn), mat(classLabels).transpose(), C, toler)
+    oS = optStruct(mat(dataMatIn), mat(classLabels).transpose(), C, toler, kTup)
     iter = 0
     entireSet = True
     alphaPairsChanged = 0
 
     # 循环遍历：循环maxIter次 并且 （alphaPairsChanged存在可以改变 or 所有行遍历一遍）
-    # 循环迭代结束 或者 循环遍历所有alpha后，alphaPairs还是没变化
     while (iter < maxIter) and ((alphaPairsChanged > 0) or (entireSet)):
         alphaPairsChanged = 0
 
@@ -346,15 +351,16 @@ def smoP(dataMatIn, classLabels, C, toler, maxIter):
             for i in range(oS.m):
                 # 是否存在alpha对，存在就+1
                 alphaPairsChanged += innerL(i, oS)
-                print("fullSet, iter: %d i:%d, pairs changed %d" % (iter, i, alphaPairsChanged))
+                # print("fullSet, iter: %d i:%d, pairs changed %d" % (iter, i, alphaPairsChanged))
             iter += 1
+
         # 对已存在 alpha对，选出非边界的alpha值，进行优化。
         else:
             # 遍历所有的非边界alpha值，也就是不在边界0或C上的值。
             nonBoundIs = nonzero((oS.alphas.A > 0) * (oS.alphas.A < C))[0]
             for i in nonBoundIs:
                 alphaPairsChanged += innerL(i, oS)
-                print("non-bound, iter: %d i:%d, pairs changed %d" % (iter, i, alphaPairsChanged))
+                # print("non-bound, iter: %d i:%d, pairs changed %d" % (iter, i, alphaPairsChanged))
             iter += 1
 
         # 如果找到alpha对，就优化非边界alpha值，否则，就重新进行寻找，如果寻找一遍 遍历所有的行还是没找到，就退出循环。
@@ -383,11 +389,132 @@ def calcWs(alphas, dataArr, classLabels):
         w += multiply(alphas[i] * labelMat[i], X[i, :].T)
     return w
 
-# 测试
-dataArr, labelArr = loadDataSet('testSet.txt')
-b, alphas = smoP(dataArr, labelArr, 0.6, 0.001, 40)
-ws = calcWs(alphas, dataArr, labelArr)
-dataMat = mat(dataArr)
-print(dataMat[0] * mat(ws) + b )
-print(labelArr[0])
+# # 测试
+# dataArr, labelArr = loadDataSet('testSet.txt')
+# b, alphas = smoP(dataArr, labelArr, 0.6, 0.001, 40)
+# ws = calcWs(alphas, dataArr, labelArr)
+# dataMat = mat(dataArr)
+# print(dataMat[0] * mat(ws) + b )
+# print(labelArr[0])
 
+
+# 核转换函数
+def kernelTrans(X, A, kTup):  # calc the kernel or transform data to a higher dimensional space
+    """
+    核转换函数
+    Args:
+        X     dataMatIn数据集
+        A     dataMatIn数据集的第i行的数据
+        kTup  核函数的信息
+
+    Returns:
+
+    """
+    m, n = shape(X)
+    K = mat(zeros((m, 1)))
+    if kTup[0] == 'lin':
+        # linear kernel:   m*n * n*1 = m*1
+        K = X * A.T
+    elif kTup[0] == 'rbf':
+        for j in range(m):
+            deltaRow = X[j, :] - A
+            K[j] = deltaRow * deltaRow.T
+        # 径向基函数的高斯版本
+        K = exp(K / (-1 * kTup[1] ** 2))  # divide in NumPy is element-wise not matrix like Matlab
+    else:
+        raise NameError('Houston We Have a Problem -- That Kernel is not recognized')
+    return K
+
+
+# 利用核函数进行分类的径向基测试函数
+
+# k1为高斯径向基函数中的用户定义变量theta
+def testRbf(k1=1.3):
+    dataArr,labelArr = loadDataSet('testSetRBF.txt')
+    b,alphas = smoP(dataArr, labelArr, 200, 0.0001, 10000, ('rbf', k1)) #C=200 important
+    datMat=mat(dataArr); labelMat = mat(labelArr).transpose()
+    svInd=nonzero(alphas.A>0)[0]
+    sVs=datMat[svInd] #get matrix of only support vectors
+    labelSV = labelMat[svInd];
+    print("there are %d Support Vectors" % shape(sVs)[0])
+    m,n = shape(datMat)
+    errorCount = 0
+    for i in range(m):
+        kernelEval = kernelTrans(sVs,datMat[i,:],('rbf', k1))
+        predict = kernelEval.T * multiply(labelSV,alphas[svInd]) + b
+        if sign(predict)!=sign(labelArr[i]): errorCount += 1
+    print("the training error rate is: %f" % (float(errorCount)/m))
+    dataArr,labelArr = loadDataSet('testSetRBF2.txt')
+    errorCount = 0
+    datMat=mat(dataArr); labelMat = mat(labelArr).transpose()
+    m,n = shape(datMat)
+    for i in range(m):
+        kernelEval = kernelTrans(sVs,datMat[i,:],('rbf', k1))
+        predict=kernelEval.T * multiply(labelSV,alphas[svInd]) + b
+        if sign(predict)!=sign(labelArr[i]): errorCount += 1
+    print("the test error rate is: %f" % (float(errorCount)/m))
+
+# # 测试
+# testRbf(0.1)
+
+
+# 基于SVM的手写数字识别
+def img2vector(filename):
+    returnVect = zeros((1, 1024))
+    fr = open(filename)
+    for i in range(32):
+        lineStr = fr.readline();
+        for j in range(32):
+            returnVect[0, 32 * i + j] = int(lineStr[j])
+    return returnVect
+
+def loadImages(dirName):
+    from os import listdir
+    hwLabels = []
+    trainingFileList = listdir(dirName)
+    m = len(trainingFileList)
+    trainingMat = zeros((m, 1024))
+    for i in range(m):
+        fileNameStr = trainingFileList[i]
+        fileStr = fileNameStr.split('.')[0]
+        classNumStr = int(fileStr.split('_')[0])
+        if classNumStr == 9: hwLabels.append(-1)
+        else: hwLabels.append(1)
+        trainingMat[i, :] = img2vector('%s/%s' % (dirName, fileNameStr))
+    return trainingMat, hwLabels
+
+def testDigits(kTup=('rbf', 10)):
+
+    # 1. 导入训练数据
+    dataArr, labelArr = loadImages('trainingDigits')
+    b, alphas = smoP(dataArr, labelArr, 200, 0.0001, 10000, kTup)
+    datMat = mat(dataArr)
+    labelMat = mat(labelArr).transpose()
+    svInd = nonzero(alphas.A > 0)[0]
+    sVs = datMat[svInd]
+    labelSV = labelMat[svInd]
+    print("there are %d Support Vectors" % shape(sVs)[0])
+    m, n = shape(datMat)
+    errorCount = 0
+    for i in range(m):
+        kernelEval = kernelTrans(sVs, datMat[i, :], kTup)
+        # 1*m * m*1 = 1*1 单个预测结果
+        predict = kernelEval.T * multiply(labelSV, alphas[svInd]) + b
+        if sign(predict) != sign(labelArr[i]): errorCount += 1
+    print("the training error rate is: %f" % (float(errorCount) / m))
+
+    # 2. 导入测试数据
+    dataArr, labelArr = loadImages('testDigits')
+    errorCount = 0
+    datMat = mat(dataArr)
+    labelMat = mat(labelArr).transpose()
+    m, n = shape(datMat)
+    for i in range(m):
+        kernelEval = kernelTrans(sVs, datMat[i, :], kTup)
+        # 1*m * m*1 = 1*1 单个预测结果
+        predict = kernelEval.T * multiply(labelSV, alphas[svInd]) + b
+        if sign(predict) != sign(labelArr[i]): errorCount += 1
+    print("the test error rate is: %f" % (float(errorCount) / m))
+
+# 测试
+testDigits(('rbf',10))
