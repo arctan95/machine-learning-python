@@ -77,6 +77,8 @@ def lwlrTest(testArr, xArr, yArr, k = 1.0):
 # fig = plt.figure()
 # ax = fig.add_subplot(111)
 # ax.plot(xSort[:,1], yHat[srtInd])
+# #a是个矩阵或者数组，a.flatten()就是把a降到一维，默认是按横的方向降
+# #此时的a是个矩阵，降维后还是个矩阵，矩阵.A（等效于矩阵.getA()）变成了数组，A[0]就是数组里的第一个元素
 # ax.scatter(xMat[:,1].flatten().A[0], mat(yArr).T.flatten().A[0], s = 2, c = 'red')
 # plt.show()
 
@@ -85,23 +87,57 @@ def rssError(yArr, yHatArr):
     return ((yArr - yHatArr) ** 2).sum()
 
 #测试
+# abX, abY = loadDataSet('abalone.txt')
+# yHat01 = lwlrTest(abX[0:99], abX[0:99], abY[0:99], 0.1)
+# yHat1 = lwlrTest(abX[0:99], abX[0:99], abY[0:99], 1)
+# yHat10 = lwlrTest(abX[0:99], abX[0:99], abY[0:99], 10)
+# print(rssError(abY[0:99],yHat01.T))
+# print(rssError(abY[0:99],yHat1.T))
+# print(rssError(abY[0:99],yHat10.T))
+#
+#
+# yHat01 = lwlrTest(abX[100:199], abX[0:99], abY[0:99], 0.1)
+# yHat1 = lwlrTest(abX[100:199], abX[0:99], abY[0:99], 1)
+# yHat10 = lwlrTest(abX[100:199], abX[0:99], abY[0:99], 10)
+# print(rssError(abY[100:199],yHat01.T))
+# print(rssError(abY[100:199],yHat1.T))
+# print(rssError(abY[100:199],yHat10.T))
+#
+# ws = standRegres(abX[0:99], abY[0:99])
+# yHat = mat(abX[100:199]) * ws
+# print(rssError(abY[100:199],yHat.T.A))
+
+
+# 岭回归
+def ridgeRegres(xMat, yMat, lam = 0.2):
+    xTx = xMat.T * xMat
+    denom = xTx + eye(shape(xMat)[1]) * lam
+    if linalg.det(denom) == 0.0:
+        print("This matrix is singular, cannot do inverse")
+        return
+    ws = denom.I * (xMat.T * yMat)
+    return ws
+
+def ridgeTest(xArr, yArr):
+    xMat = mat(xArr); yMat = mat(yArr).T
+    yMean = mean(yMat, 0)
+    yMat = yMat - yMean
+    xMeans = mean(xMat,0)
+    # var()求方差
+    xVar = var(xMat, 0)
+    xMat = (xMat - xMeans) / xVar
+    numTestPts = 30
+    wMat = zeros((numTestPts, shape(xMat)[1]))
+    for i in range(numTestPts):
+        ws = ridgeRegres(xMat, yMat, exp(i-10))
+        wMat[i,:] = ws.T
+    return wMat
+
+# 测试
 abX, abY = loadDataSet('abalone.txt')
-yHat01 = lwlrTest(abX[0:99], abX[0:99], abY[0:99], 0.1)
-yHat1 = lwlrTest(abX[0:99], abX[0:99], abY[0:99], 1)
-yHat10 = lwlrTest(abX[0:99], abX[0:99], abY[0:99], 10)
-print(rssError(abY[0:99],yHat01.T))
-print(rssError(abY[0:99],yHat1.T))
-print(rssError(abY[0:99],yHat10.T))
-
-
-yHat01 = lwlrTest(abX[100:199], abX[0:99], abY[0:99], 0.1)
-yHat1 = lwlrTest(abX[100:199], abX[0:99], abY[0:99], 1)
-yHat10 = lwlrTest(abX[100:199], abX[0:99], abY[0:99], 10)
-print(rssError(abY[100:199],yHat01.T))
-print(rssError(abY[100:199],yHat1.T))
-print(rssError(abY[100:199],yHat10.T))
-
-ws = standRegres(abX[0:99], abY[0:99])
-yHat = mat(abX[100:199]) * ws
-print(rssError(abY[100:199],yHat.T.A))
+ridgeWeights = ridgeTest(abX, abY)
+fig = plt.figure()
+ax = fig.add_subplot(111)
+ax.plot(ridgeWeights)
+plt.show()
 
