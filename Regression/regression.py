@@ -122,7 +122,7 @@ def ridgeTest(xArr, yArr):
     xMat = mat(xArr); yMat = mat(yArr).T
     yMean = mean(yMat, 0)
     yMat = yMat - yMean
-    xMeans = mean(xMat,0)
+    xMeans = mean(xMat, 0)
     # var()求方差
     xVar = var(xMat, 0)
     xMat = (xMat - xMeans) / xVar
@@ -134,10 +134,54 @@ def ridgeTest(xArr, yArr):
     return wMat
 
 # 测试
-abX, abY = loadDataSet('abalone.txt')
-ridgeWeights = ridgeTest(abX, abY)
-fig = plt.figure()
-ax = fig.add_subplot(111)
-ax.plot(ridgeWeights)
-plt.show()
+# abX, abY = loadDataSet('abalone.txt')
+# ridgeWeights = ridgeTest(abX, abY)
+# fig = plt.figure()
+# ax = fig.add_subplot(111)
+# ax.plot(ridgeWeights)
+# plt.show()
+
+# 前向逐步回归
+# eps 每次迭代需要调整的步长 numIt 迭代次数
+def stageWise(xArr, yArr, eps = 0.01, numIt = 100):
+    xMat = mat(xArr); yMat = mat(yArr).T
+    yMean = mean(yMat, 0)
+    yMat = yMat - yMean
+    xMeans = mean(xMat, 0)
+    # var()求方差
+    xVar = var(xMat, 0)
+    xMat = (xMat - xMeans) / xVar
+    m, n = shape(xMat)
+    returnMat = zeros((numIt, n))
+    ws = zeros((n, 1)); wsTest = ws.copy(); wsMax = ws.copy()
+    for i in range(numIt):
+        print(ws.T)
+        lowestError = inf;
+        for j in range(n):
+            for sign in [-1, 1]:
+                wsTest = ws.copy()
+                wsTest[j] += eps * sign
+                yTest = xMat * wsTest
+                # 矩阵.A（等效于矩阵.getA()）变成了数组
+                rssE = rssError(yMat.A, yTest.A)
+                if rssE < lowestError:
+                    lowestError = rssE
+                    wsMax = wsTest
+        ws = wsMax.copy()
+        returnMat[i,:] = ws.T
+    return returnMat
+
+# 测试
+xArr, yArr = loadDataSet('abalone.txt')
+# print(stageWise(xArr, yArr, 0.001, 5000))
+xMat = mat(xArr)
+yMat = mat(yArr).T
+xMeans = mean(xMat, 0)
+# var()求方差
+xVar = var(xMat, 0)
+xMat = (xMat - xMeans) / xVar
+yM = mean(yMat, 0)
+yMat = yMat - yM
+weights = standRegres(xMat, yMat.T)
+print(weights.T)
 
